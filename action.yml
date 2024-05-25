@@ -1,0 +1,85 @@
+name: "Clike"
+description: "Run Clike, create a pull request and report"
+author: "Khulnasoft"
+inputs:
+  NAME:
+    required: true
+    description: "The Clike source fancy name"
+  SOURCE:
+    required: true
+    description: "The Clike source"
+  AUTHOR:
+    required: false
+    description: "The Clike pull request author"
+    default: "rapidmerge-ci-bot <rapidmerge-ci-bot@users.noreply.github.com>"
+  GITHUB_TOKEN:
+    required: true
+    description: "GitHub Token"
+  SLACK_WEBHOOK_URL:
+    required: true
+    description: "Slack notification"
+  CLIKE_CONFIGURATION:
+    required: false
+    description: Clike configuration file
+    default: ".github/clike.yml"
+  LABELS:
+    required: false
+    description: Clike pull request labels
+  PUSH_TO_FORK:
+    required: false
+    description: Repository to push the pull request to
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install PyYAML
+      shell: bash
+      run: pip install PyYAML
+
+    - name: Run Clike
+      shell: bash
+      id: clike
+      run: |
+        python ${{ github.action_path }}//clike.py -c "${{ inputs.CLIKE_CONFIGURATION }}" -s "${{ inputs.SOURCE }}"
+
+    - name: Get version
+      id: version
+      shell: bash
+      run: |
+        set -xv
+        VAR=$(echo "${{ inputs.SOURCE }}" | tr 'a-z' 'A-Z' | tr '-' '_')
+        VERSION=$(echo '${{ toJSON(steps.clike.outputs) }}'|jq -r ".${VAR}")
+        echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+
+    - name: Create the Pull Request
+      id: cpr
+      # yamllint disable-line rule:line-length
+      # nosemgrep: yaml.github-actions.security.third-party-action-not-pinned-to-commit-sha.third-party-action-not-pinned-to-commit-sha
+      uses: peter-evans/create-pull-request@v6
+      with:
+        token: ${{ inputs.GITHUB_TOKEN }}
+        author: ${{ inputs.AUTHOR }}
+        push-to-fork: ${{ inputs.PUSH_TO_FORK }}
+        title: "chore: bump ${{ inputs.NAME }} version to ${{ steps.version.outputs.VERSION }}"
+        commit-message: "chore: bump ${{ inputs.NAME }} version to ${{ steps.version.outputs.VERSION }}"
+        # yamllint disable-line rule:line-length
+        body: This is an automated bump of ${{ inputs.NAME }} version to ${{ steps.version.outputs.VERSION }}
+        branch: clike/${{ inputs.SOURCE }}-upgrade
+        base: main
+        labels: ${{ inputs.LABELS }}
+
+    - name: Check outputs
+      shell: bash
+      run: |
+        echo "Pull Request Number - ${{ steps.cpr.outputs.pull-request-number }}"
+        echo "Pull Request URL - ${{ steps.cpr.outputs.pull-request-url }}"
+
+    - name: Report Status
+      if: failure()
+      # yamllint disable-line rule:line-length
+      # nosemgrep: yaml.github-actions.security.third-party-action-not-pinned-to-commit-sha.third-party-action-not-pinned-to-commit-sha
+      uses: khulnasoft-lab/gha-slack-notification@main
+      with:
+        message: "Clike: ${{ inputs.SOURCE }} version bump"
+        SLACK_WEBHOOK_URL: ${{ inputs.SLACK_WEBHOOK_URL }}
+        OVERRIDE_JOB_STATUS: failure
